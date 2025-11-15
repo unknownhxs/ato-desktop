@@ -1,4 +1,5 @@
-# ATO Game - Version Desktop (Linux/Windows)
+# ATO - Version Desktop (Linux/Windows)
+By hxs - alpha 1
 
 Version adaptée du jeu ATO pour Linux et Windows utilisant pygame.
 
