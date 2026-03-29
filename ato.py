@@ -2,6 +2,7 @@
 A.T.O - Jeu de type exploration avec génération procédurale de monde
 """
 
+import os
 import sys
 import subprocess
 import time
@@ -60,6 +61,7 @@ PS = 28  # Taille du joueur (Player Size)
 SPD = 8  # Vitesse de déplacement du joueur (en pixels logiques)
 BORDER_SIZE = 10  # Taille de la bordure
 MAX_CHUNKS_LOADED = 100  # Nombre maximum de chunks chargés en mémoire
+GRASS_TILE_38_FREQUENCY = 80  # Seuil (sur 100) pour afficher la tuile d'herbe 38 — soit 80% des tuiles d'herbe
 HALF_W = SCREEN_W // 2  # Moitié de la largeur (pour centrer)
 HALF_H = SCREEN_H // 2  # Moitié de la hauteur (pour centrer)
 
@@ -117,7 +119,6 @@ def load_grass_tiles():
     global grass_tiles, field_38_tile
     grass_tiles = []
     field_38_tile = None
-    import os
     # Chemins possibles pour trouver les assets
     base_paths = [
         "desktop/assets/fields",
@@ -152,7 +153,6 @@ def load_tree_tiles():
     """
     global tree_tiles
     tree_tiles = []
-    import os
     # Chemins possibles pour trouver les assets
     base_paths = [
         "desktop/assets/Trees",
@@ -216,6 +216,14 @@ def get_seed(x, y, cx=0, cy=0):
     seed = (x * 73856093) ^ (y * 19349663) ^ (cx * 83492791) ^ (cy * 19283746)
     seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF
     return seed
+
+def tile_seed(tx, ty):
+    """
+    Calcule un seed pseudo-aléatoire déterministe basé sur les coordonnées d'une tuile.
+    Utilisé pour choisir quelle image afficher pour une tuile donnée (herbe, arbre...).
+    """
+    seed = (tx * 73856093) ^ (ty * 19349663)
+    return (seed * 1103515245 + 12345) & 0x7FFFFFFF
 
 def random_chance(x, y, probability, cx=0, cy=0):
     """
@@ -303,7 +311,7 @@ def generate_forest_biome(chunk, cx, cy):
     
     # Deuxième passe : fait pousser les arbres autour des graines
     # Plusieurs itérations pour créer des groupes plus denses
-    for iteration in range(2):
+    for _ in range(2):
         for ty in range(CHUNK_TILES):
             for tx in range(CHUNK_TILES):
                 if get_tile(chunk, tx, ty) == T_GRASS:
@@ -398,21 +406,16 @@ def draw_grass_tile(sx, sy, wx, wy):
     Dessine une tuile d'herbe à l'écran.
     Utilisé pour T_GRASS et comme fond pour T_TREE.
     """
-    if field_38_tile is not None or len(grass_tiles) > 0:
-        tx = wx // TS
-        ty = wy // TS
-        # Générateur pseudo-aléatoire déterministe basé sur la position
-        seed = (tx * 73856093) ^ (ty * 19349663)
-        seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF
-        rand = seed % 100
-        # 80% de chance d'afficher la tuile 38 (plus fréquente)
-        if rand < 80 and field_38_tile is not None:
-            screen.blit(field_38_tile, (sx, sy))
-        elif len(grass_tiles) > 0:
-            grass_index = seed % len(grass_tiles)
-            screen.blit(grass_tiles[grass_index], (sx, sy))
-        else:
-            pygame.draw.rect(screen, COLORS['G'], (sx, sy, DISPLAY_TS, DISPLAY_TS))
+    tx = wx // TS
+    ty = wy // TS
+    seed = tile_seed(tx, ty)
+    rand = seed % 100
+    # Affiche la tuile 38 dans GRASS_TILE_38_FREQUENCY% des cas, sinon une tuile aléatoire parmi les autres
+    if rand < GRASS_TILE_38_FREQUENCY and field_38_tile is not None:
+        screen.blit(field_38_tile, (sx, sy))
+    elif len(grass_tiles) > 0:
+        grass_index = seed % len(grass_tiles)
+        screen.blit(grass_tiles[grass_index], (sx, sy))
     else:
         pygame.draw.rect(screen, COLORS['G'], (sx, sy, DISPLAY_TS, DISPLAY_TS))
 
@@ -434,9 +437,7 @@ def draw_tile_screen(sx, sy, tile_type, wx=0, wy=0):
         if len(tree_tiles) > 0:
             tx = wx // TS
             ty = wy // TS
-            # Générateur pseudo-aléatoire déterministe basé sur la position
-            seed = (tx * 73856093) ^ (ty * 19349663)
-            seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF
+            seed = tile_seed(tx, ty)
             tree_index = seed % len(tree_tiles)
             screen.blit(tree_tiles[tree_index], (sx, sy))
         else:
@@ -531,22 +532,22 @@ def handle_input(wx, wy, keys):
     Gère les entrées clavier pour déplacer le joueur.
     Retourne les nouvelles coordonnées monde et un booléen indiquant si le joueur a bougé.
     """
-    nwx, nwy, m = wx, wy, False
+    new_x, new_y, moved = wx, wy, False
     # Déplacement vertical
     if keys[pygame.K_UP] or keys[pygame.K_w]:
-        nwy -= SPD
-        m = True
+        new_y -= SPD
+        moved = True
     elif keys[pygame.K_DOWN] or keys[pygame.K_s]:
-        nwy += SPD
-        m = True
+        new_y += SPD
+        moved = True
     # Déplacement horizontal
     if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-        nwx -= SPD
-        m = True
+        new_x -= SPD
+        moved = True
     elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-        nwx += SPD
-        m = True
-    return nwx, nwy, m
+        new_x += SPD
+        moved = True
+    return new_x, new_y, moved
 
 def draw_fps(fps):
     """
@@ -733,7 +734,6 @@ def draw_console(console_text, console_history):
     screen.blit(title, (10, 10))
     
     # Historique des commandes (dernières 15 lignes)
-    y_offset = 40
     line_count = 0
     max_lines = 15
     for line in reversed(console_history[-max_lines:]):
